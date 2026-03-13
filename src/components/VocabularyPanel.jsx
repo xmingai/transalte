@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getVocabulary, removeWord } from '@/services/storage'
-import { speakText, stopAudio } from '@/services/tts'
+import { getVocabulary, removeWord, getGeneratedContents, saveGeneratedContent, removeGeneratedContent } from '@/services/storage'
+import { speakText, stopAudio, isPlaying } from '@/services/tts'
 import { getApiKey, STORAGE_KEYS } from '@/services/storage'
 import { generateContentFromWords } from '@/services/generateContent'
 import { parseSSEStream } from '@/services/translate'
@@ -20,6 +20,7 @@ import {
   Loader2,
   Copy,
   Check,
+  Trash2 as Trash2Icon,
 } from 'lucide-react'
 
 export default function VocabularyPanel({ refreshKey }) {
@@ -31,9 +32,12 @@ export default function VocabularyPanel({ refreshKey }) {
   const [generatingDate, setGeneratingDate] = useState(null)
   const [generatedContents, setGeneratedContents] = useState({})
   const [copiedDate, setCopiedDate] = useState(null)
+  const [speakingContent, setSpeakingContent] = useState(null)
 
   useEffect(() => {
     setVocabulary(getVocabulary())
+    // Load saved generated contents from localStorage
+    setGeneratedContents(getGeneratedContents())
   }, [refreshKey])
 
   // Group vocabulary by date
@@ -108,6 +112,10 @@ export default function VocabularyPanel({ refreshKey }) {
         result += chunk
         setGeneratedContents(prev => ({ ...prev, [dateKey]: result }))
       }
+      // Save to localStorage after streaming completes
+      if (result && !result.startsWith('❌')) {
+        saveGeneratedContent(dateKey, result)
+      }
     } catch (err) {
       setGeneratedContents(prev => ({
         ...prev,
@@ -117,6 +125,55 @@ export default function VocabularyPanel({ refreshKey }) {
       setGeneratingDate(null)
     }
   }, [generatingDate])
+
+  // Delete saved generated content
+  const handleDeleteContent = useCallback((dateKey) => {
+    removeGeneratedContent(dateKey)
+    setGeneratedContents(prev => {
+      const next = { ...prev }
+      delete next[dateKey]
+      return next
+    })
+  }, [])
+
+  // Extract English text from generated content (strip markdown bold + Chinese lines)
+  const extractEnglishText = useCallback((text) => {
+    if (!text) return ''
+    return text
+      .split('\n')
+      .filter(line => {
+        const trimmed = line.trim()
+        // Skip empty lines, theme header, Chinese summary
+        if (!trimmed) return false
+        if (trimmed.startsWith('📝')) return false
+        if (trimmed.startsWith('📖')) return false
+        // Skip lines that are predominantly Chinese
+        if (/[\u4e00-\u9fff]/.test(trimmed) && !/^[a-zA-Z]/.test(trimmed)) return false
+        return true
+      })
+      .join(' ')
+      .replace(/\*\*/g, '') // strip markdown bold
+      .trim()
+  }, [])
+
+  // Speak generated English content
+  const handleSpeakContent = useCallback(async (dateKey, text) => {
+    if (speakingContent === dateKey) {
+      stopAudio()
+      setSpeakingContent(null)
+      return
+    }
+    const englishText = extractEnglishText(text)
+    if (!englishText) return
+    setSpeakingContent(dateKey)
+    try {
+      await speakText(englishText, 'en-US')
+    } catch {
+      // silent
+    } finally {
+      setSpeakingContent(null)
+    }
+  }, [speakingContent, extractEnglishText])
 
   const handleCopyContent = async (dateKey) => {
     const content = generatedContents[dateKey]
@@ -283,23 +340,48 @@ export default function VocabularyPanel({ refreshKey }) {
                         <Sparkles className="w-3 h-3" />
                         <span>AI 生成内容</span>
                       </div>
-                      <button
-                        onClick={() => handleCopyContent(dateKey)}
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                        title="复制内容"
-                      >
-                        {copiedDate === dateKey ? (
-                          <>
-                            <Check className="w-3 h-3 text-green-500" />
-                            <span className="text-green-500">已复制</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>复制</span>
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {/* TTS button — read English content aloud */}
+                        <button
+                          onClick={() => handleSpeakContent(dateKey, generatedContent)}
+                          disabled={!getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY) || isGenerating}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors disabled:opacity-40"
+                          title="朗读英文内容"
+                        >
+                          {speakingContent === dateKey ? (
+                            <Square className="w-3 h-3 animate-pulse-ring" />
+                          ) : (
+                            <Volume2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>{speakingContent === dateKey ? '停止' : '朗读'}</span>
+                        </button>
+                        {/* Copy button */}
+                        <button
+                          onClick={() => handleCopyContent(dateKey)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          title="复制内容"
+                        >
+                          {copiedDate === dateKey ? (
+                            <>
+                              <Check className="w-3 h-3 text-green-500" />
+                              <span className="text-green-500">已复制</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>复制</span>
+                            </>
+                          )}
+                        </button>
+                        {/* Delete button */}
+                        <button
+                          onClick={() => handleDeleteContent(dateKey)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
+                          title="删除生成内容"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                     <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
                       {renderGeneratedContent(generatedContent)}

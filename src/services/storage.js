@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   GOOGLE_TTS_API_KEY: 'translator_google_tts_api_key',
   VOCABULARY: 'translator_vocabulary',
   THEME: 'translator_theme',
+  GENERATED_CONTENTS: 'translator_generated_contents',
 }
 
 export function getApiKey(key) {
@@ -60,6 +61,26 @@ export function setTheme(theme) {
   } else {
     document.documentElement.classList.remove('dark')
   }
+}
+
+export function getGeneratedContents() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.GENERATED_CONTENTS) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+export function saveGeneratedContent(dateKey, content) {
+  const all = getGeneratedContents()
+  all[dateKey] = content
+  localStorage.setItem(STORAGE_KEYS.GENERATED_CONTENTS, JSON.stringify(all))
+}
+
+export function removeGeneratedContent(dateKey) {
+  const all = getGeneratedContents()
+  delete all[dateKey]
+  localStorage.setItem(STORAGE_KEYS.GENERATED_CONTENTS, JSON.stringify(all))
 }
 
 export { STORAGE_KEYS }
