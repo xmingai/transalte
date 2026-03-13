@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getVocabulary, removeWord } from '@/services/storage'
-import { speakText } from '@/services/tts'
+import { speakText, stopAudio } from '@/services/tts'
 import { getApiKey, STORAGE_KEYS } from '@/services/storage'
 import {
   Search,
   Trash2,
   Volume2,
+  Square,
   BookOpen,
   Clock,
   X,
@@ -36,6 +37,11 @@ export default function VocabularyPanel({ refreshKey }) {
   }
 
   const handleSpeak = async (word, id) => {
+    if (speakingId === id) {
+      stopAudio()
+      setSpeakingId(null)
+      return
+    }
     setSpeakingId(id)
     try {
       await speakText(word, 'en-US')
@@ -56,6 +62,44 @@ export default function VocabularyPanel({ refreshKey }) {
     if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
     if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`
     return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  }
+
+  // Parse explanation to highlight structure
+  const renderExplanation = (text) => {
+    if (!text) return null
+    const lines = text.split('\n').filter(l => l.trim())
+    return (
+      <div className="space-y-0.5">
+        {lines.map((line, i) => {
+          const trimmed = line.trim()
+          if (trimmed.startsWith('释义：') || trimmed.startsWith('释义:')) {
+            return (
+              <p key={i} className="text-sm text-foreground/90">
+                <span className="text-primary font-medium">释义</span>
+                <span className="text-muted-foreground ml-1">{trimmed.replace(/^释义[：:]/, '').trim()}</span>
+              </p>
+            )
+          }
+          if (trimmed.startsWith('例句：') || trimmed.startsWith('例句:')) {
+            return (
+              <p key={i} className="text-xs text-muted-foreground/80 italic mt-1">
+                {trimmed.replace(/^例句[：:]/, '').trim()}
+              </p>
+            )
+          }
+          if (trimmed.startsWith('翻译：') || trimmed.startsWith('翻译:')) {
+            return (
+              <p key={i} className="text-xs text-muted-foreground/60">
+                {trimmed.replace(/^翻译[：:]/, '').trim()}
+              </p>
+            )
+          }
+          return (
+            <p key={i} className="text-sm text-muted-foreground">{trimmed}</p>
+          )
+        })}
+      </div>
+    )
   }
 
   return (
@@ -99,7 +143,7 @@ export default function VocabularyPanel({ refreshKey }) {
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <BookOpen className="w-12 h-12 mb-4 opacity-30" />
           <p className="text-sm">
-            {searchQuery ? '没有找到匹配的单词' : '生词本还是空的，翻译后点击 📖 收藏单词'}
+            {searchQuery ? '没有找到匹配的单词' : '生词本还是空的，翻译时选中英文单词即可收藏'}
           </p>
         </div>
       ) : (
@@ -112,7 +156,7 @@ export default function VocabularyPanel({ refreshKey }) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-base font-semibold text-foreground">
                       {item.word}
                     </span>
@@ -120,20 +164,17 @@ export default function VocabularyPanel({ refreshKey }) {
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => handleSpeak(item.word, item.id)}
-                      disabled={speakingId === item.id || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
+                      disabled={!getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary h-6 w-6 transition-opacity"
                     >
-                      <Volume2 className={`w-3.5 h-3.5 ${speakingId === item.id ? 'text-primary animate-pulse-ring' : ''}`} />
+                      {speakingId === item.id ? (
+                        <Square className="w-3 h-3 fill-primary text-primary" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5" />
+                      )}
                     </Button>
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {item.translation}
-                  </p>
-                  {item.sentence && (
-                    <p className="text-xs text-muted-foreground/60 mt-1 italic truncate">
-                      "{item.sentence}"
-                    </p>
-                  )}
+                  {renderExplanation(item.translation)}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <div className="flex items-center gap-1 text-xs text-muted-foreground/50 mr-2">

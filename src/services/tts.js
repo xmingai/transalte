@@ -1,15 +1,19 @@
 import { getApiKey, STORAGE_KEYS } from './storage'
 
+let currentSource = null
 let audioContext = null
 
 function getAudioContext() {
-  if (!audioContext) {
+  if (!audioContext || audioContext.state === 'closed') {
     audioContext = new (window.AudioContext || window.webkitAudioContext)()
   }
   return audioContext
 }
 
 export async function speakText(text, languageCode = 'en-US') {
+  // Stop any currently playing audio first
+  stopAudio()
+
   const apiKey = getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)
   if (!apiKey) {
     throw new Error('请先在设置中配置 Google Cloud TTS API Key')
@@ -19,7 +23,6 @@ export async function speakText(text, languageCode = 'en-US') {
     throw new Error('没有可朗读的文本')
   }
 
-  // Select appropriate voice
   const voiceConfig = getVoiceConfig(languageCode)
 
   const response = await fetch(
@@ -53,7 +56,6 @@ export async function speakText(text, languageCode = 'en-US') {
   const data = await response.json()
   const audioContent = data.audioContent
 
-  // Decode base64 and play
   const audioBytes = atob(audioContent)
   const audioArray = new Uint8Array(audioBytes.length)
   for (let i = 0; i < audioBytes.length; i++) {
@@ -61,14 +63,20 @@ export async function speakText(text, languageCode = 'en-US') {
   }
 
   const ctx = getAudioContext()
-  const audioBuffer = await ctx.decodeAudioData(audioArray.buffer)
+  const audioBuffer = await ctx.decodeAudioData(audioArray.buffer.slice(0))
   const source = ctx.createBufferSource()
   source.buffer = audioBuffer
   source.connect(ctx.destination)
+  currentSource = source
   source.start(0)
 
   return new Promise((resolve) => {
-    source.onended = resolve
+    source.onended = () => {
+      if (currentSource === source) {
+        currentSource = null
+      }
+      resolve()
+    }
   })
 }
 
@@ -89,10 +97,17 @@ function getVoiceConfig(languageCode) {
   }
 }
 
-// Stop any playing audio
 export function stopAudio() {
-  if (audioContext) {
-    audioContext.close()
-    audioContext = null
+  if (currentSource) {
+    try {
+      currentSource.stop()
+    } catch {
+      // already stopped
+    }
+    currentSource = null
   }
+}
+
+export function isPlaying() {
+  return currentSource !== null
 }

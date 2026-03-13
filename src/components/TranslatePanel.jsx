@@ -1,18 +1,21 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { translateText, parseSSEStream } from '@/services/translate'
 import { speakText, stopAudio } from '@/services/tts'
+import { explainWord } from '@/services/wordExplain'
 import { addWord, getApiKey, STORAGE_KEYS } from '@/services/storage'
 import {
   Languages,
   Volume2,
-  VolumeX,
+  Square,
   Copy,
   Check,
   BookPlus,
   Loader2,
   ArrowRightLeft,
   Eraser,
+  Sparkles,
+  X,
 } from 'lucide-react'
 
 export default function TranslatePanel({ onWordAdded }) {
@@ -22,9 +25,16 @@ export default function TranslatePanel({ onWordAdded }) {
   const [isSpeakingSource, setIsSpeakingSource] = useState(false)
   const [isSpeakingTarget, setIsSpeakingTarget] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [wordAdded, setWordAdded] = useState(false)
   const [error, setError] = useState('')
-  const abortRef = useRef(null)
+
+  // Word selection state
+  const [selectedWord, setSelectedWord] = useState('')
+  const [selectionPos, setSelectionPos] = useState(null)
+  const [isExplaining, setIsExplaining] = useState(false)
+  const [wordExplanation, setWordExplanation] = useState('')
+  const [wordAdded, setWordAdded] = useState(false)
+  const sourceRef = useRef(null)
+  const popupRef = useRef(null)
 
   const handleTranslate = useCallback(async () => {
     if (!sourceText.trim() || isTranslating) return
@@ -60,6 +70,11 @@ export default function TranslatePanel({ onWordAdded }) {
     }
   }, [])
 
+  const handleStopSpeak = useCallback((setPlaying) => {
+    stopAudio()
+    setPlaying(false)
+  }, [])
+
   const handleCopy = useCallback(async () => {
     if (!translatedText) return
     await navigator.clipboard.writeText(translatedText)
@@ -67,18 +82,13 @@ export default function TranslatePanel({ onWordAdded }) {
     setTimeout(() => setCopied(false), 2000)
   }, [translatedText])
 
-  const handleAddWord = useCallback(() => {
-    if (!sourceText.trim() || !translatedText.trim()) return
-    addWord(sourceText.trim(), translatedText.trim())
-    setWordAdded(true)
-    setTimeout(() => setWordAdded(false), 2000)
-    onWordAdded?.()
-  }, [sourceText, translatedText, onWordAdded])
-
   const handleClear = useCallback(() => {
     setSourceText('')
     setTranslatedText('')
     setError('')
+    setSelectedWord('')
+    setSelectionPos(null)
+    setWordExplanation('')
     stopAudio()
   }, [])
 
@@ -88,6 +98,68 @@ export default function TranslatePanel({ onWordAdded }) {
       handleTranslate()
     }
   }, [handleTranslate])
+
+  // Handle text selection in source textarea
+  const handleSourceSelect = useCallback(() => {
+    const textarea = sourceRef.current
+    if (!textarea) return
+
+    const selected = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).trim()
+
+    if (selected && selected.length > 0 && selected.length < 80 && /[a-zA-Z]/.test(selected)) {
+      setSelectedWord(selected)
+      setWordExplanation('')
+      setWordAdded(false)
+
+      // Position popup near the textarea
+      const rect = textarea.getBoundingClientRect()
+      setSelectionPos({
+        top: rect.top + 40,
+        left: rect.left + rect.width / 2,
+      })
+    }
+  }, [])
+
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (popupRef.current && !popupRef.current.contains(e.target)) {
+        setSelectedWord('')
+        setSelectionPos(null)
+        setWordExplanation('')
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Explain & add word
+  const handleExplainAndAdd = useCallback(async () => {
+    if (!selectedWord || isExplaining) return
+    setIsExplaining(true)
+    setWordExplanation('')
+
+    try {
+      const explanation = await explainWord(selectedWord)
+      setWordExplanation(explanation)
+
+      // Auto-add to vocabulary
+      addWord(selectedWord, explanation)
+      setWordAdded(true)
+      onWordAdded?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setIsExplaining(false)
+    }
+  }, [selectedWord, isExplaining, onWordAdded])
+
+  const dismissPopup = useCallback(() => {
+    setSelectedWord('')
+    setSelectionPos(null)
+    setWordExplanation('')
+    setWordAdded(false)
+  }, [])
 
   const charCount = sourceText.length
 
@@ -120,31 +192,42 @@ export default function TranslatePanel({ onWordAdded }) {
         <div className="relative group">
           <div className="rounded-xl border border-border bg-card overflow-hidden transition-all duration-300 focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/50">
             <textarea
+              ref={sourceRef}
               value={sourceText}
               onChange={(e) => setSourceText(e.target.value)}
               onKeyDown={handleKeyDown}
+              onMouseUp={handleSourceSelect}
+              onKeyUp={handleSourceSelect}
               placeholder="Type English text here..."
               className="w-full min-h-[220px] max-h-[400px] p-5 bg-transparent text-foreground text-[15px] leading-relaxed resize-none placeholder:text-muted-foreground/60"
               autoFocus
             />
             <div className="flex items-center justify-between px-4 py-2.5 border-t border-border/50 bg-muted/30">
               <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => handleSpeak(sourceText, 'en-US', setIsSpeakingSource)}
-                  disabled={!sourceText.trim() || isSpeakingSource || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
-                  className="text-muted-foreground hover:text-primary"
-                  title="朗读英文"
-                >
-                  {isSpeakingSource ? (
+                {isSpeakingSource ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleStopSpeak(setIsSpeakingSource)}
+                    className="text-primary hover:text-destructive"
+                    title="停止朗读"
+                  >
                     <div className="animate-pulse-ring">
-                      <Volume2 className="w-4 h-4 text-primary" />
+                      <Square className="w-3.5 h-3.5 fill-current" />
                     </div>
-                  ) : (
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleSpeak(sourceText, 'en-US', setIsSpeakingSource)}
+                    disabled={!sourceText.trim() || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
+                    className="text-muted-foreground hover:text-primary"
+                    title="朗读英文"
+                  >
                     <Volume2 className="w-4 h-4" />
-                  )}
-                </Button>
+                  </Button>
+                )}
               </div>
               <span className="text-xs text-muted-foreground/70">
                 {charCount > 0 && `${charCount} 字符`}
@@ -178,22 +261,30 @@ export default function TranslatePanel({ onWordAdded }) {
             </div>
             <div className="flex items-center justify-between px-4 py-2.5 border-t border-border/50 bg-muted/30">
               <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => handleSpeak(translatedText, 'zh-CN', setIsSpeakingTarget)}
-                  disabled={!translatedText.trim() || isSpeakingTarget || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
-                  className="text-muted-foreground hover:text-primary"
-                  title="朗读中文"
-                >
-                  {isSpeakingTarget ? (
+                {isSpeakingTarget ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleStopSpeak(setIsSpeakingTarget)}
+                    className="text-primary hover:text-destructive"
+                    title="停止朗读"
+                  >
                     <div className="animate-pulse-ring">
-                      <Volume2 className="w-4 h-4 text-primary" />
+                      <Square className="w-3.5 h-3.5 fill-current" />
                     </div>
-                  ) : (
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleSpeak(translatedText, 'zh-CN', setIsSpeakingTarget)}
+                    disabled={!translatedText.trim() || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
+                    className="text-muted-foreground hover:text-primary"
+                    title="朗读中文"
+                  >
                     <Volume2 className="w-4 h-4" />
-                  )}
-                </Button>
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -206,20 +297,6 @@ export default function TranslatePanel({ onWordAdded }) {
                     <Check className="w-4 h-4 text-green-500" />
                   ) : (
                     <Copy className="w-4 h-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={handleAddWord}
-                  disabled={!sourceText.trim() || !translatedText.trim()}
-                  className="text-muted-foreground hover:text-amber-500"
-                  title="添加到生词本"
-                >
-                  {wordAdded ? (
-                    <Check className="w-4 h-4 text-green-500" />
-                  ) : (
-                    <BookPlus className="w-4 h-4" />
                   )}
                 </Button>
               </div>
@@ -259,6 +336,66 @@ export default function TranslatePanel({ onWordAdded }) {
         <p className="text-center text-sm text-amber-500/80 mt-3 animate-fade-in">
           ⚠️ 请先在「设置」中配置 DeepSeek API Key
         </p>
+      )}
+
+      {/* Word selection popup */}
+      {selectedWord && selectionPos && (
+        <div
+          ref={popupRef}
+          className="fixed z-50 animate-fade-in"
+          style={{
+            top: `${selectionPos.top}px`,
+            left: `${selectionPos.left}px`,
+            transform: 'translateX(-50%)',
+          }}
+        >
+          <div className="bg-card border border-border rounded-xl shadow-2xl p-4 min-w-[280px] max-w-[360px]">
+            {/* Popup header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span className="font-semibold text-foreground text-sm">
+                  {selectedWord}
+                </span>
+              </div>
+              <button
+                onClick={dismissPopup}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Explanation content */}
+            {wordExplanation ? (
+              <div className="space-y-2 mb-3">
+                <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                  {wordExplanation}
+                </div>
+                {wordAdded && (
+                  <div className="flex items-center gap-1.5 text-xs text-green-500">
+                    <Check className="w-3.5 h-3.5" />
+                    已加入生词本
+                  </div>
+                )}
+              </div>
+            ) : isExplaining ? (
+              <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                正在查询释义...
+              </div>
+            ) : (
+              <Button
+                onClick={handleExplainAndAdd}
+                disabled={!getApiKey(STORAGE_KEYS.DEEPSEEK_API_KEY)}
+                className="w-full h-9 text-sm bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-sm"
+              >
+                <BookPlus className="w-4 h-4 mr-1.5" />
+                查询并加入生词本
+              </Button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
