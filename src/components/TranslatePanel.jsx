@@ -33,6 +33,7 @@ export default function TranslatePanel({ onWordAdded }) {
   const [isExplaining, setIsExplaining] = useState(false)
   const [wordExplanation, setWordExplanation] = useState('')
   const [wordAdded, setWordAdded] = useState(false)
+  const [isSpeakingWord, setIsSpeakingWord] = useState(false)
   const sourceRef = useRef(null)
   const popupRef = useRef(null)
 
@@ -426,7 +427,34 @@ export default function TranslatePanel({ onWordAdded }) {
           {wordExplanation && (
             <div className="bg-card border border-border rounded-xl shadow-2xl p-3 max-w-[260px]">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-semibold text-foreground">{selectedWord}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-semibold text-foreground">{selectedWord}</span>
+                  <button
+                    onClick={async () => {
+                      if (isSpeakingWord) {
+                        stopAudio()
+                        setIsSpeakingWord(false)
+                        return
+                      }
+                      try {
+                        setIsSpeakingWord(true)
+                        await speakText(selectedWord, 'en-US')
+                      } catch {
+                        // ignore
+                      } finally {
+                        setIsSpeakingWord(false)
+                      }
+                    }}
+                    className="text-muted-foreground hover:text-primary transition-colors"
+                    title="朗读单词"
+                  >
+                    {isSpeakingWord ? (
+                      <Square className="w-3 h-3 animate-pulse-ring" />
+                    ) : (
+                      <Volume2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
                 <button
                   onClick={dismissPopup}
                   className="text-muted-foreground hover:text-foreground transition-colors ml-2"
