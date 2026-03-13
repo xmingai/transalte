@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { translateText, parseSSEStream } from '@/services/translate'
 import { speakText, stopAudio } from '@/services/tts'
@@ -96,8 +97,54 @@ export default function TranslatePanel({ onWordAdded }) {
     }
   }, [handleTranslate])
 
-  // Handle text selection via mouse position
-  const handleSourceMouseUp = useCallback((e) => {
+  // Calculate the pixel position of a caret index inside a textarea using the
+  // textarea-caret-position algorithm (creates a mirror div overlaid on the textarea)
+  const getCaretCoords = useCallback((textarea, position) => {
+    const computed = window.getComputedStyle(textarea)
+    const mirror = document.createElement('div')
+    document.body.appendChild(mirror)
+
+    mirror.id = 'textarea-caret-position-mirror'
+    const mirrorStyle = mirror.style
+    mirrorStyle.whiteSpace = 'pre-wrap'
+    mirrorStyle.wordWrap = 'break-word'
+    mirrorStyle.position = 'absolute'
+    mirrorStyle.visibility = 'hidden'
+    mirrorStyle.overflow = 'hidden'
+
+    // Transfer relevant styles from the textarea to the mirror
+    const stylesToCopy = [
+      'direction', 'boxSizing', 'width', 'overflowX',
+      'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
+      'letterSpacing', 'textTransform', 'textIndent', 'textDecoration',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+      'lineHeight', 'tabSize', 'wordSpacing',
+    ]
+    stylesToCopy.forEach(prop => { mirrorStyle[prop] = computed[prop] })
+
+    const textContent = textarea.value.substring(0, position)
+    // Replace spaces with non-breaking spaces so they render properly
+    mirror.textContent = textContent
+
+    const span = document.createElement('span')
+    // The character after the caret (or a dot for measurement)
+    span.textContent = textarea.value.substring(position) || '.'
+    mirror.appendChild(span)
+
+    const coordinates = {
+      top: span.offsetTop + parseInt(computed.borderTopWidth),
+      left: span.offsetLeft + parseInt(computed.borderLeftWidth),
+      height: parseInt(computed.lineHeight) || parseInt(computed.fontSize),
+    }
+
+    document.body.removeChild(mirror)
+    return coordinates
+  }, [])
+
+  // Handle text selection — position popup below the selected word
+  const handleSourceMouseUp = useCallback(() => {
     const textarea = sourceRef.current
     if (!textarea) return
 
@@ -108,10 +155,14 @@ export default function TranslatePanel({ onWordAdded }) {
       setWordExplanation('')
       setWordAdded(false)
 
-      // Position popup near the mouse cursor
+      // Get caret coordinates relative to the textarea
+      const coords = getCaretCoords(textarea, textarea.selectionStart)
+      const textareaRect = textarea.getBoundingClientRect()
+
+      // Position popup below the selected word
       setSelectionPos({
-        top: e.clientY + 8,
-        left: e.clientX,
+        top: textareaRect.top + coords.top + coords.height - textarea.scrollTop,
+        left: textareaRect.left + coords.left,
       })
     } else {
       // Don't dismiss if popup is showing explanation
@@ -120,7 +171,7 @@ export default function TranslatePanel({ onWordAdded }) {
         setSelectionPos(null)
       }
     }
-  }, [wordExplanation, isExplaining])
+  }, [wordExplanation, isExplaining, getCaretCoords])
 
   // Close popup when clicking outside
   useEffect(() => {
@@ -336,15 +387,14 @@ export default function TranslatePanel({ onWordAdded }) {
         </p>
       )}
 
-      {/* Word selection popup — compact, attached to cursor */}
-      {selectedWord && selectionPos && (
+      {/* Word selection popup — rendered via portal to avoid CSS transform containment */}
+      {selectedWord && selectionPos && createPortal(
         <div
           ref={popupRef}
-          className="fixed z-50 animate-fade-in"
+          className="fixed z-[9999]"
           style={{
             top: `${selectionPos.top}px`,
             left: `${selectionPos.left}px`,
-            transform: 'translateX(-50%)',
           }}
         >
           {/* Before query: compact pill with word + icon button */}
@@ -395,7 +445,8 @@ export default function TranslatePanel({ onWordAdded }) {
               )}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
