@@ -14,7 +14,6 @@ import {
   Loader2,
   ArrowRightLeft,
   Eraser,
-  Sparkles,
   X,
 } from 'lucide-react'
 
@@ -86,9 +85,7 @@ export default function TranslatePanel({ onWordAdded }) {
     setSourceText('')
     setTranslatedText('')
     setError('')
-    setSelectedWord('')
-    setSelectionPos(null)
-    setWordExplanation('')
+    dismissPopup()
     stopAudio()
   }, [])
 
@@ -99,8 +96,8 @@ export default function TranslatePanel({ onWordAdded }) {
     }
   }, [handleTranslate])
 
-  // Handle text selection in source textarea
-  const handleSourceSelect = useCallback(() => {
+  // Handle text selection via mouse position
+  const handleSourceMouseUp = useCallback((e) => {
     const textarea = sourceRef.current
     if (!textarea) return
 
@@ -111,22 +108,25 @@ export default function TranslatePanel({ onWordAdded }) {
       setWordExplanation('')
       setWordAdded(false)
 
-      // Position popup near the textarea
-      const rect = textarea.getBoundingClientRect()
+      // Position popup near the mouse cursor
       setSelectionPos({
-        top: rect.top + 40,
-        left: rect.left + rect.width / 2,
+        top: e.clientY + 8,
+        left: e.clientX,
       })
+    } else {
+      // Don't dismiss if popup is showing explanation
+      if (!wordExplanation && !isExplaining) {
+        setSelectedWord('')
+        setSelectionPos(null)
+      }
     }
-  }, [])
+  }, [wordExplanation, isExplaining])
 
   // Close popup when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (popupRef.current && !popupRef.current.contains(e.target)) {
-        setSelectedWord('')
-        setSelectionPos(null)
-        setWordExplanation('')
+        dismissPopup()
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -142,13 +142,12 @@ export default function TranslatePanel({ onWordAdded }) {
     try {
       const explanation = await explainWord(selectedWord)
       setWordExplanation(explanation)
-
-      // Auto-add to vocabulary
       addWord(selectedWord, explanation)
       setWordAdded(true)
       onWordAdded?.()
     } catch (err) {
       setError(err.message)
+      dismissPopup()
     } finally {
       setIsExplaining(false)
     }
@@ -196,8 +195,7 @@ export default function TranslatePanel({ onWordAdded }) {
               value={sourceText}
               onChange={(e) => setSourceText(e.target.value)}
               onKeyDown={handleKeyDown}
-              onMouseUp={handleSourceSelect}
-              onKeyUp={handleSourceSelect}
+              onMouseUp={handleSourceMouseUp}
               placeholder="Type English text here..."
               className="w-full min-h-[220px] max-h-[400px] p-5 bg-transparent text-foreground text-[15px] leading-relaxed resize-none placeholder:text-muted-foreground/60"
               autoFocus
@@ -338,7 +336,7 @@ export default function TranslatePanel({ onWordAdded }) {
         </p>
       )}
 
-      {/* Word selection popup */}
+      {/* Word selection popup — compact, attached to cursor */}
       {selectedWord && selectionPos && (
         <div
           ref={popupRef}
@@ -349,52 +347,54 @@ export default function TranslatePanel({ onWordAdded }) {
             transform: 'translateX(-50%)',
           }}
         >
-          <div className="bg-card border border-border rounded-xl shadow-2xl p-4 min-w-[280px] max-w-[360px]">
-            {/* Popup header */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                <span className="font-semibold text-foreground text-sm">
-                  {selectedWord}
-                </span>
-              </div>
+          {/* Before query: compact pill with word + icon button */}
+          {!wordExplanation && !isExplaining && (
+            <div className="flex items-center gap-1.5 bg-card border border-border rounded-lg shadow-xl px-2.5 py-1.5">
+              <span className="text-sm font-medium text-foreground max-w-[120px] truncate">
+                {selectedWord}
+              </span>
               <button
-                onClick={dismissPopup}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Explanation content */}
-            {wordExplanation ? (
-              <div className="space-y-2 mb-3">
-                <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
-                  {wordExplanation}
-                </div>
-                {wordAdded && (
-                  <div className="flex items-center gap-1.5 text-xs text-green-500">
-                    <Check className="w-3.5 h-3.5" />
-                    已加入生词本
-                  </div>
-                )}
-              </div>
-            ) : isExplaining ? (
-              <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                正在查询释义...
-              </div>
-            ) : (
-              <Button
                 onClick={handleExplainAndAdd}
                 disabled={!getApiKey(STORAGE_KEYS.DEEPSEEK_API_KEY)}
-                className="w-full h-9 text-sm bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-sm"
+                className="w-7 h-7 rounded-md bg-amber-500 hover:bg-amber-400 text-white flex items-center justify-center transition-colors shrink-0 disabled:opacity-40"
+                title="查询并加入生词本"
               >
-                <BookPlus className="w-4 h-4 mr-1.5" />
-                查询并加入生词本
-              </Button>
-            )}
-          </div>
+                <BookPlus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Loading state */}
+          {isExplaining && (
+            <div className="flex items-center gap-2 bg-card border border-border rounded-lg shadow-xl px-3 py-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
+              <span className="text-xs text-muted-foreground">查询中...</span>
+            </div>
+          )}
+
+          {/* Result: compact card with explanation */}
+          {wordExplanation && (
+            <div className="bg-card border border-border rounded-xl shadow-2xl p-3 max-w-[260px]">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-semibold text-foreground">{selectedWord}</span>
+                <button
+                  onClick={dismissPopup}
+                  className="text-muted-foreground hover:text-foreground transition-colors ml-2"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                {wordExplanation}
+              </div>
+              {wordAdded && (
+                <div className="flex items-center gap-1 text-[10px] text-green-500 mt-1.5">
+                  <Check className="w-3 h-3" />
+                  已加入生词本
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
