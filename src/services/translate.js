@@ -1,6 +1,6 @@
 import { getApiKey, STORAGE_KEYS } from './storage'
 
-export async function translateText(text) {
+export async function translateText(text, direction = 'en-zh') {
   const apiKey = getApiKey(STORAGE_KEYS.DEEPSEEK_API_KEY)
   if (!apiKey) {
     throw new Error('请先在设置中配置 DeepSeek API Key')
@@ -9,6 +9,22 @@ export async function translateText(text) {
   if (!text.trim()) {
     throw new Error('请输入要翻译的文本')
   }
+
+  const systemContent = direction === 'zh-en'
+    ? `你是一个专业的中译英翻译引擎。请将用户输入的中文翻译成地道、自然的英文。
+规则：
+1. 只输出翻译结果，不要输出任何解释、注释或额外内容
+2. 保持原文的语气和风格
+3. 专有名词请给出准确的英文表述
+4. 翻译结果可以适当进行意译，以便更符合英语母语者的表达习惯
+5. 如果输入的已经是英文，请润色它`
+    : `你是一个专业的英译中翻译引擎。请将用户输入的英文翻译成地道、自然的中文。
+规则：
+1. 只输出翻译结果，不要输出任何解释、注释或额外内容
+2. 保持原文的语气和风格
+3. 专业术语使用通用的中文译法
+4. 如果是单个单词，请给出：词性 + 主要释义（最多3个）
+5. 如果输入的不是英文，请直接将其翻译成中文`
 
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
@@ -21,13 +37,7 @@ export async function translateText(text) {
       messages: [
         {
           role: 'system',
-          content: `你是一个专业的英译中翻译引擎。请将用户输入的英文翻译成地道、自然的中文。
-规则：
-1. 只输出翻译结果，不要输出任何解释、注释或额外内容
-2. 保持原文的语气和风格
-3. 专业术语使用通用的中文译法
-4. 如果是单个单词，请给出：词性 + 主要释义（最多3个）
-5. 如果输入的不是英文，请直接将其翻译成中文`
+          content: systemContent
         },
         {
           role: 'user',

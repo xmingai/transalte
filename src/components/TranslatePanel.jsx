@@ -22,6 +22,7 @@ export default function TranslatePanel({ onWordAdded }) {
   const [sourceText, setSourceText] = useState('')
   const [translatedText, setTranslatedText] = useState('')
   const [isTranslating, setIsTranslating] = useState(false)
+  const [direction, setDirection] = useState('en-zh')
   const [isSpeakingSource, setIsSpeakingSource] = useState(false)
   const [isSpeakingTarget, setIsSpeakingTarget] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -44,7 +45,7 @@ export default function TranslatePanel({ onWordAdded }) {
     setTranslatedText('')
 
     try {
-      const stream = await translateText(sourceText)
+      const stream = await translateText(sourceText, direction)
       const reader = parseSSEStream(stream)
       let result = ''
 
@@ -220,11 +221,23 @@ export default function TranslatePanel({ onWordAdded }) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className="px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium">
-            English
+            {direction === 'en-zh' ? 'English' : '中文'}
           </div>
-          <ArrowRightLeft className="w-4 h-4 text-muted-foreground" />
+          <button
+            onClick={() => {
+              setDirection(prev => prev === 'en-zh' ? 'zh-en' : 'en-zh')
+              const temp = sourceText
+              setSourceText(translatedText)
+              setTranslatedText(temp)
+              dismissPopup()
+            }}
+            className="p-1.5 rounded-full hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+            title="切换语言"
+          >
+            <ArrowRightLeft className="w-4 h-4 transition-transform active:rotate-180" />
+          </button>
           <div className="px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium">
-            中文
+            {direction === 'en-zh' ? '中文' : 'English'}
           </div>
         </div>
         <Button
@@ -248,7 +261,7 @@ export default function TranslatePanel({ onWordAdded }) {
               onChange={(e) => setSourceText(e.target.value)}
               onKeyDown={handleKeyDown}
               onMouseUp={handleSourceMouseUp}
-              placeholder="Type English text here..."
+              placeholder={direction === 'en-zh' ? "Type English text here..." : "输入中文文本..."}
               className="w-full min-h-[220px] max-h-[400px] p-5 bg-transparent text-foreground text-[15px] leading-relaxed resize-none placeholder:text-muted-foreground/60"
               autoFocus
             />
@@ -270,10 +283,10 @@ export default function TranslatePanel({ onWordAdded }) {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => handleSpeak(sourceText, 'en-US', setIsSpeakingSource)}
+                    onClick={() => handleSpeak(sourceText, direction === 'en-zh' ? 'en-US' : 'zh-CN', setIsSpeakingSource)}
                     disabled={!sourceText.trim() || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
                     className="text-muted-foreground hover:text-primary"
-                    title="朗读英文"
+                    title={direction === 'en-zh' ? "朗读英文" : "朗读中文"}
                   >
                     <Volume2 className="w-4 h-4" />
                   </Button>
@@ -327,10 +340,10 @@ export default function TranslatePanel({ onWordAdded }) {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => handleSpeak(translatedText, 'zh-CN', setIsSpeakingTarget)}
+                    onClick={() => handleSpeak(translatedText, direction === 'en-zh' ? 'zh-CN' : 'en-US', setIsSpeakingTarget)}
                     disabled={!translatedText.trim() || !getApiKey(STORAGE_KEYS.GOOGLE_TTS_API_KEY)}
                     className="text-muted-foreground hover:text-primary"
-                    title="朗读中文"
+                    title={direction === 'en-zh' ? "朗读中文" : "朗读英文"}
                   >
                     <Volume2 className="w-4 h-4" />
                   </Button>
